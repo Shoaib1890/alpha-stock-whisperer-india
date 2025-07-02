@@ -4,11 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  Plus,
-  Star,
-  AlertCircle,
-} from "lucide-react";
+import { Plus, Star, AlertCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import NewsCard from "@/components/NewsCard";
 import PortfolioStock from "@/components/PortfolioStock";
@@ -34,12 +30,27 @@ interface Stock {
   changePercent: number;
 }
 
+type SentimentSummaryItem = {
+  headline: string;
+  sentiment: "positive" | "negative" | "neutral";
+  confidence: number;
+};
+
+interface SentimentAnalysis {
+  overall: "positive" | "negative" | "neutral";
+  confidence: number;
+  summary: SentimentSummaryItem[];
+}
+
 const Index = () => {
   const [news, setNews] = useState<NewsItem[]>([]);
   const [portfolio, setPortfolio] = useState<Stock[]>([]);
   const [newStock, setNewStock] = useState("");
   const [loading, setLoading] = useState(false);
-  const [sentimentAnalysis, setSentimentAnalysis] = useState<any>(null);
+  // const [sentimentAnalysis, setSentimentAnalysis] = useState<any>(null);
+  const [sentimentAnalysis, setSentimentAnalysis] =
+    useState<SentimentAnalysis | null>(null);
+
   const [portfolioNews, setPortfolioNews] = useState<NewsItem[]>([]);
   const { toast } = useToast();
 
@@ -64,7 +75,24 @@ const Index = () => {
     loadData();
   }, []);
 
-  const getRelevantNews = (newsData: NewsItem[], portfolioSymbols: string[]) => {
+  useEffect(() => {
+    if (portfolio.length > 0 || news.length > 0) {
+      analyzeSentiment(news, portfolio);
+    } else {
+      // Clear data if portfolio is empty
+      setSentimentAnalysis({
+        overall: "neutral",
+        confidence: 70,
+        summary: [],
+      });
+      setPortfolioNews([]);
+    }
+  }, [portfolio, news]);
+
+  const getRelevantNews = (
+    newsData: NewsItem[],
+    portfolioSymbols: string[]
+  ) => {
     return newsData.filter((n) => {
       const matchesStocks =
         n.stocks?.some((stock) =>
@@ -108,8 +136,8 @@ const Index = () => {
       console.warn("⚠ No relevant headlines found for sentiment analysis.");
       setSentimentAnalysis({
         overall: "neutral",
-        // confidence: 70,
-        summary: []
+        confidence: 70,
+        summary: [],
       });
       setPortfolioNews(getPortfolioNews(portfolioData, newsData));
       return;
@@ -146,8 +174,10 @@ const Index = () => {
 
       const avgConfidence = relevantSummary.length
         ? Math.round(
-            relevantSummary.reduce((sum, item) => sum + (item.confidence || 70), 0) /
-              relevantSummary.length
+            relevantSummary.reduce(
+              (sum, item) => sum + (item.confidence || 70),
+              0
+            ) / relevantSummary.length
           )
         : 70;
 
@@ -192,7 +222,7 @@ const Index = () => {
           body: JSON.stringify(stockData),
         });
 
-        await analyzeSentiment(news, updatedPortfolio);
+        // await analyzeSentiment(news, updatedPortfolio);
       } catch (error) {
         toast({
           title: "Error",
@@ -204,7 +234,9 @@ const Index = () => {
   };
 
   const removeStock = async (symbol: string) => {
-    const updatedPortfolio = portfolio.filter((stock) => stock.symbol !== symbol);
+    const updatedPortfolio = portfolio.filter(
+      (stock) => stock.symbol !== symbol
+    );
     setPortfolio(updatedPortfolio);
 
     await fetch(`http://localhost:5000/api/portfolio/${symbol}`, {
@@ -216,7 +248,7 @@ const Index = () => {
       description: `${symbol} has been removed from your portfolio`,
     });
 
-    await analyzeSentiment(news, updatedPortfolio);
+    // await analyzeSentiment(news, updatedPortfolio);
   };
 
   return (
@@ -262,12 +294,13 @@ const Index = () => {
                     />
                     {Array.isArray(sentimentAnalysis.summary) ? (
                       <div className="space-y-1 text-sm text-gray-700">
-                        {sentimentAnalysis.summary.map((item: any, idx: number) => (
+                        {sentimentAnalysis.summary.map((item, idx) => (
                           <div key={idx} className="border-b pb-1">
                             <strong>{item.headline}</strong>
                             <br />
                             Sentiment:{" "}
-                            <span className="capitalize">{item.sentiment}</span>, Confidence: {item.confidence}%
+                            <span className="capitalize">{item.sentiment}</span>
+                            , Confidence: {item.confidence}%
                           </div>
                         ))}
                       </div>
