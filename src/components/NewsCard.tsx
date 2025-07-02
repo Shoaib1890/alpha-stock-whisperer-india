@@ -52,9 +52,9 @@ const NewsCard = ({ news, showStocks = false }: NewsCardProps) => {
           {news.sentiment && (
             <div className="flex items-center gap-1">
               {getSentimentIcon(news.sentiment)}
-              {news.confidence && (
+              {/* {news.confidence && (
                 <span className="text-xs text-gray-600">{news.confidence}%</span>
-              )}
+              )} */}
             </div>
           )}
         </div>

@@ -1,15 +1,19 @@
-
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { TrendingUp, TrendingDown, Minus, Plus, Search, Star, AlertCircle } from "lucide-react";
+import {
+  Plus,
+  Star,
+  AlertCircle,
+} from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import NewsCard from "@/components/NewsCard";
 import PortfolioStock from "@/components/PortfolioStock";
 import SentimentIndicator from "@/components/SentimentIndicator";
+import { stockMap } from "@/lib/stockMap";
 
 interface NewsItem {
   id: string;
@@ -18,7 +22,7 @@ interface NewsItem {
   time: string;
   summary: string;
   stocks?: string[];
-  sentiment?: 'positive' | 'negative' | 'neutral';
+  sentiment?: "positive" | "negative" | "neutral";
   confidence?: number;
 }
 
@@ -36,126 +40,184 @@ const Index = () => {
   const [newStock, setNewStock] = useState("");
   const [loading, setLoading] = useState(false);
   const [sentimentAnalysis, setSentimentAnalysis] = useState<any>(null);
+  const [portfolioNews, setPortfolioNews] = useState<NewsItem[]>([]);
   const { toast } = useToast();
 
-  // Mock news data - In production, this would come from news APIs
-  const mockNews: NewsItem[] = [
-    {
-      id: "1",
-      title: "HDFC Bank reports strong Q3 results, NII grows 15% YoY",
-      source: "Economic Times",
-      time: "2 hours ago",
-      summary: "HDFC Bank's net interest income grew 15% year-on-year driven by strong loan growth",
-      stocks: ["HDFCBANK"],
-      sentiment: "positive",
-      confidence: 85
-    },
-    {
-      id: "2",
-      title: "Infosys wins major digital transformation deal worth $2B",
-      source: "Moneycontrol",
-      time: "4 hours ago",
-      summary: "The deal spans 5 years and will boost Infosys's revenue significantly",
-      stocks: ["INFY"],
-      sentiment: "positive",
-      confidence: 90
-    },
-    {
-      id: "3",
-      title: "RBI maintains repo rate at 6.5%, signals cautious stance",
-      source: "Business Standard",
-      time: "6 hours ago",
-      summary: "Central bank keeps rates unchanged citing inflation concerns",
-      sentiment: "neutral",
-      confidence: 70
-    },
-    {
-      id: "4",
-      title: "Reliance Industries faces regulatory challenges in telecom sector",
-      source: "Financial Express",
-      time: "8 hours ago",
-      summary: "New regulations may impact Jio's expansion plans",
-      stocks: ["RELIANCE"],
-      sentiment: "negative",
-      confidence: 75
-    }
-  ];
-
-  // Mock portfolio data
-  const mockStocks: Stock[] = [
-    { symbol: "HDFCBANK", name: "HDFC Bank", price: 1687.50, change: 25.30, changePercent: 1.52 },
-    { symbol: "INFY", name: "Infosys", price: 1456.80, change: -12.45, changePercent: -0.85 },
-    { symbol: "RELIANCE", name: "Reliance Industries", price: 2890.25, change: 15.60, changePercent: 0.54 },
-    { symbol: "TCS", name: "Tata Consultancy Services", price: 3567.90, change: -5.20, changePercent: -0.15 }
-  ];
-
   useEffect(() => {
-    // Simulate loading news
-    setLoading(true);
-    setTimeout(() => {
-      setNews(mockNews);
-      setPortfolio(mockStocks);
+    const loadData = async () => {
+      setLoading(true);
+
+      const newsRes = await fetch("http://localhost:5000/api/news");
+      const newsData = await newsRes.json();
+
+      const portfolioRes = await fetch("http://localhost:5000/api/portfolio");
+      const portfolioData = await portfolioRes.json();
+
+      setNews(newsData);
+      setPortfolio(portfolioData);
+
+      await analyzeSentiment(newsData, portfolioData);
+
       setLoading(false);
-      analyzeSentiment();
-    }, 1000);
+    };
+
+    loadData();
   }, []);
 
-  const addStock = () => {
-    if (newStock.trim()) {
-      // In production, this would validate and fetch real stock data
-      const newStockData: Stock = {
-        symbol: newStock.toUpperCase(),
-        name: `${newStock.toUpperCase()} Company`,
-        price: Math.random() * 1000 + 500,
-        change: (Math.random() - 0.5) * 50,
-        changePercent: (Math.random() - 0.5) * 5
-      };
-      setPortfolio([...portfolio, newStockData]);
-      setNewStock("");
-      toast({
-        title: "Stock Added",
-        description: `${newStock.toUpperCase()} has been added to your portfolio`,
+  const getRelevantNews = (newsData: NewsItem[], portfolioSymbols: string[]) => {
+    return newsData.filter((n) => {
+      const matchesStocks =
+        n.stocks?.some((stock) =>
+          portfolioSymbols.includes(stock.toUpperCase())
+        ) ?? false;
+
+      const matchesTitle = portfolioSymbols.some((symbol) =>
+        n.title.toLowerCase().includes(symbol.toLowerCase())
+      );
+
+      return matchesStocks || matchesTitle;
+    });
+  };
+
+  const getPortfolioNews = (portfolio: Stock[], allNews: NewsItem[]) => {
+    const aliases = portfolio.flatMap(
+      (stock) => stockMap[stock.symbol] || [stock.symbol]
+    );
+
+    return allNews.filter((article) =>
+      aliases.some((alias) =>
+        article.title.toLowerCase().includes(alias.toLowerCase())
+      )
+    );
+  };
+
+  const analyzeSentiment = async (
+    newsData = news,
+    portfolioData = portfolio
+  ) => {
+    const portfolioSymbols = portfolioData.map((s) => s.symbol.toUpperCase());
+    console.log("📦 Portfolio Symbols for sentiment:", portfolioSymbols);
+
+    const relevantNews = getRelevantNews(newsData, portfolioSymbols);
+    console.log("📰 Relevant news for sentiment:", relevantNews);
+
+    const headlines = relevantNews.map((n) => n.title);
+    console.log("🧠 Headlines to send for sentiment:", headlines);
+
+    if (headlines.length === 0) {
+      console.warn("⚠ No relevant headlines found for sentiment analysis.");
+      setSentimentAnalysis({
+        overall: "neutral",
+        // confidence: 70,
+        summary: []
       });
+      setPortfolioNews(getPortfolioNews(portfolioData, newsData));
+      return;
+    }
+
+    try {
+      const response = await fetch("http://localhost:5000/api/sentiment", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ headlines }),
+      });
+
+      const result = await response.json();
+      const relevantSummary = Array.isArray(result.sentiment)
+        ? result.sentiment
+        : [];
+
+      const dominantSentiment = relevantSummary.reduce((acc, item) => {
+        const score =
+          item.sentiment === "positive"
+            ? 1
+            : item.sentiment === "negative"
+            ? -1
+            : 0;
+        return acc + score;
+      }, 0);
+
+      const overall =
+        dominantSentiment > 0
+          ? "positive"
+          : dominantSentiment < 0
+          ? "negative"
+          : "neutral";
+
+      const avgConfidence = relevantSummary.length
+        ? Math.round(
+            relevantSummary.reduce((sum, item) => sum + (item.confidence || 70), 0) /
+              relevantSummary.length
+          )
+        : 70;
+
+      setSentimentAnalysis({
+        overall,
+        confidence: avgConfidence,
+        summary: relevantSummary,
+      });
+    } catch (error) {
+      console.error("❌ Sentiment analysis failed:", error);
+      setSentimentAnalysis(null);
+    }
+
+    setPortfolioNews(getPortfolioNews(portfolioData, newsData));
+  };
+
+  const addStock = async () => {
+    if (newStock.trim()) {
+      try {
+        const response = await fetch("http://localhost:5000/api/stock", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ symbol: newStock.trim().toUpperCase() }),
+        });
+
+        if (!response.ok) throw new Error("Failed to fetch stock data");
+
+        const stockData: Stock = await response.json();
+
+        const updatedPortfolio = [...portfolio, stockData];
+        setPortfolio(updatedPortfolio);
+        setNewStock("");
+
+        toast({
+          title: "Stock Added",
+          description: `${stockData.symbol} has been added to your portfolio`,
+        });
+
+        await fetch("http://localhost:5000/api/portfolio", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(stockData),
+        });
+
+        await analyzeSentiment(news, updatedPortfolio);
+      } catch (error) {
+        toast({
+          title: "Error",
+          description: "Could not fetch stock data. Please try again.",
+          variant: "destructive",
+        });
+      }
     }
   };
 
-  const removeStock = (symbol: string) => {
-    setPortfolio(portfolio.filter(stock => stock.symbol !== symbol));
+  const removeStock = async (symbol: string) => {
+    const updatedPortfolio = portfolio.filter((stock) => stock.symbol !== symbol);
+    setPortfolio(updatedPortfolio);
+
+    await fetch(`http://localhost:5000/api/portfolio/${symbol}`, {
+      method: "DELETE",
+    });
+
     toast({
       title: "Stock Removed",
       description: `${symbol} has been removed from your portfolio`,
     });
-  };
 
-  const analyzeSentiment = () => {
-    // Mock AI analysis - In production, this would call OpenAI API
-    const portfolioSymbols = mockStocks.map(s => s.symbol);
-    const relevantNews = mockNews.filter(n => 
-      n.stocks && n.stocks.some(stock => portfolioSymbols.includes(stock))
-    );
-    
-    const positiveCount = relevantNews.filter(n => n.sentiment === 'positive').length;
-    const negativeCount = relevantNews.filter(n => n.sentiment === 'negative').length;
-    
-    let overallSentiment = 'neutral';
-    if (positiveCount > negativeCount) overallSentiment = 'positive';
-    else if (negativeCount > positiveCount) overallSentiment = 'negative';
-    
-    setSentimentAnalysis({
-      overall: overallSentiment,
-      confidence: Math.round((Math.max(positiveCount, negativeCount) / relevantNews.length) * 100),
-      summary: `Based on ${relevantNews.length} relevant news items, your portfolio shows ${overallSentiment} sentiment`,
-      positiveCount,
-      negativeCount,
-      neutralCount: relevantNews.length - positiveCount - negativeCount
-    });
+    await analyzeSentiment(news, updatedPortfolio);
   };
-
-  const filteredNews = news.filter(item => 
-    item.stocks && item.stocks.some(stock => 
-      portfolio.some(p => p.symbol === stock)
-    )
-  );
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
@@ -170,7 +232,6 @@ const Index = () => {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-          {/* Portfolio Summary */}
           <Card className="lg:col-span-1">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -187,21 +248,40 @@ const Index = () => {
                 <div className="flex justify-between items-center">
                   <span className="text-sm text-gray-600">Portfolio Value</span>
                   <span className="font-semibold text-green-600">
-                    ₹{(portfolio.reduce((sum, stock) => sum + stock.price, 0)).toLocaleString()}
+                    ₹
+                    {portfolio
+                      .reduce((sum, stock) => sum + stock.price, 0)
+                      .toLocaleString()}
                   </span>
                 </div>
                 {sentimentAnalysis && (
-                  <SentimentIndicator 
-                    sentiment={sentimentAnalysis.overall}
-                    confidence={sentimentAnalysis.confidence}
-                    summary={sentimentAnalysis.summary}
-                  />
+                  <div className="space-y-2">
+                    <SentimentIndicator
+                      sentiment={sentimentAnalysis.overall}
+                      confidence={sentimentAnalysis.confidence}
+                    />
+                    {Array.isArray(sentimentAnalysis.summary) ? (
+                      <div className="space-y-1 text-sm text-gray-700">
+                        {sentimentAnalysis.summary.map((item: any, idx: number) => (
+                          <div key={idx} className="border-b pb-1">
+                            <strong>{item.headline}</strong>
+                            <br />
+                            Sentiment:{" "}
+                            <span className="capitalize">{item.sentiment}</span>, Confidence: {item.confidence}%
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-600">
+                        {sentimentAnalysis.summary}
+                      </p>
+                    )}
+                  </div>
                 )}
               </div>
             </CardContent>
           </Card>
 
-          {/* Add Stock */}
           <Card className="lg:col-span-2">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -215,10 +295,13 @@ const Index = () => {
                   placeholder="Enter stock symbol (e.g., HDFCBANK)"
                   value={newStock}
                   onChange={(e) => setNewStock(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && addStock()}
+                  onKeyPress={(e) => e.key === "Enter" && addStock()}
                   className="flex-1"
                 />
-                <Button onClick={addStock} className="bg-blue-600 hover:bg-blue-700">
+                <Button
+                  onClick={addStock}
+                  className="bg-blue-600 hover:bg-blue-700"
+                >
                   <Plus className="h-4 w-4 mr-2" />
                   Add Stock
                 </Button>
@@ -242,35 +325,35 @@ const Index = () => {
               </Badge>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {loading ? (
-                Array.from({ length: 4 }).map((_, i) => (
-                  <Card key={i} className="animate-pulse">
-                    <CardContent className="p-6">
-                      <div className="h-4 bg-gray-200 rounded mb-2"></div>
-                      <div className="h-3 bg-gray-200 rounded w-2/3"></div>
-                    </CardContent>
-                  </Card>
-                ))
-              ) : (
-                news.map((item) => (
-                  <NewsCard key={item.id} news={item} />
-                ))
-              )}
+              {loading
+                ? Array.from({ length: 4 }).map((_, i) => (
+                    <Card key={i} className="animate-pulse">
+                      <CardContent className="p-6">
+                        <div className="h-4 bg-gray-200 rounded mb-2"></div>
+                        <div className="h-3 bg-gray-200 rounded w-2/3"></div>
+                      </CardContent>
+                    </Card>
+                  ))
+                : news.map((item) => <NewsCard key={item.id} news={item} />)}
             </div>
           </TabsContent>
 
           <TabsContent value="portfolio-news" className="space-y-4">
             <div className="flex items-center justify-between">
-              <h2 className="text-2xl font-semibold">Portfolio-Relevant News</h2>
+              <h2 className="text-2xl font-semibold">
+                Portfolio-Relevant News
+              </h2>
               <Badge variant="outline" className="text-sm">
-                {filteredNews.length} relevant articles
+                {portfolioNews.length} relevant articles
               </Badge>
             </div>
-            {filteredNews.length === 0 ? (
+            {portfolioNews.length === 0 ? (
               <Card>
                 <CardContent className="p-8 text-center">
                   <AlertCircle className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                  <p className="text-gray-600">No portfolio-specific news found</p>
+                  <p className="text-gray-600">
+                    No portfolio-specific news found
+                  </p>
                   <p className="text-sm text-gray-500 mt-2">
                     Add stocks to your portfolio to see relevant news
                   </p>
@@ -278,7 +361,7 @@ const Index = () => {
               </Card>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {filteredNews.map((item) => (
+                {portfolioNews.map((item) => (
                   <NewsCard key={item.id} news={item} showStocks />
                 ))}
               </div>
@@ -294,9 +377,9 @@ const Index = () => {
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {portfolio.map((stock) => (
-                <PortfolioStock 
-                  key={stock.symbol} 
-                  stock={stock} 
+                <PortfolioStock
+                  key={stock.symbol}
+                  stock={stock}
                   onRemove={() => removeStock(stock.symbol)}
                 />
               ))}
