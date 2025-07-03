@@ -57,15 +57,22 @@ const Index = () => {
 
   const [portfolioNews, setPortfolioNews] = useState<NewsItem[]>([]);
   const { toast } = useToast();
+  const baseUrl = import.meta.env.VITE_API_URL;
 
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
 
-      const newsRes = await fetch("http://localhost:5000/api/news");
+      // const newsRes = await fetch("http://localhost:5000/api/news");
+      // const newsData = await newsRes.json();
+
+      // const portfolioRes = await fetch("http://localhost:5000/api/portfolio");
+      // const portfolioData = await portfolioRes.json();
+
+      const newsRes = await fetch(`${baseUrl}/api/news`);
       const newsData = await newsRes.json();
 
-      const portfolioRes = await fetch("http://localhost:5000/api/portfolio");
+      const portfolioRes = await fetch(`${baseUrl}/api/portfolio`);
       const portfolioData = await portfolioRes.json();
 
       setNews(newsData);
@@ -148,7 +155,12 @@ const Index = () => {
     }
 
     try {
-      const response = await fetch("http://localhost:5000/api/sentiment", {
+      // const response = await fetch("http://localhost:5000/api/sentiment", {
+      //   method: "POST",
+      //   headers: { "Content-Type": "application/json" },
+      //   body: JSON.stringify({ headlines }),
+      // });
+      const response = await fetch(`${baseUrl}/api/sentiment`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ headlines }),
@@ -201,7 +213,12 @@ const Index = () => {
   const addStock = async () => {
     if (newStock.trim()) {
       try {
-        const response = await fetch("http://localhost:5000/api/stock", {
+        // const response = await fetch("http://localhost:5000/api/stock", {
+        //   method: "POST",
+        //   headers: { "Content-Type": "application/json" },
+        //   body: JSON.stringify({ symbol: newStock.trim().toUpperCase() }),
+        // });
+        const response = await fetch(`${baseUrl}/api/stock`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ symbol: newStock.trim().toUpperCase() }),
@@ -220,7 +237,12 @@ const Index = () => {
           description: `${stockData.symbol} has been added to your portfolio`,
         });
 
-        await fetch("http://localhost:5000/api/portfolio", {
+        // await fetch("http://localhost:5000/api/portfolio", {
+        //   method: "POST",
+        //   headers: { "Content-Type": "application/json" },
+        //   body: JSON.stringify(stockData),
+        // });
+        await fetch(`${baseUrl}/api/portfolio`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(stockData),
@@ -243,7 +265,10 @@ const Index = () => {
     );
     setPortfolio(updatedPortfolio);
 
-    await fetch(`http://localhost:5000/api/portfolio/${symbol}`, {
+    // await fetch(`http://localhost:5000/api/portfolio/${symbol}`, {
+    //   method: "DELETE",
+    // });
+    await fetch(`${baseUrl}/api/portfolio/${symbol}`, {
       method: "DELETE",
     });
 
