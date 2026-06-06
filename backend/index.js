@@ -4,7 +4,9 @@ const dotenv = require('dotenv');
 const app = express();
 
 dotenv.config();
-app.use(cors());
+app.use(cors({
+  origin: process.env.FRONTEND_URL || '*'
+}));
 app.use(express.json());
 
 // ✅ Routes
