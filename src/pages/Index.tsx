@@ -1,15 +1,27 @@
-import { useState, useEffect } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+﻿import { useState, useEffect, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, Star, AlertCircle } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Plus,
+  TrendingUp,
+  Newspaper,
+  BarChart3,
+  BriefcaseBusiness,
+  AlertCircle,
+  RefreshCw,
+  WifiOff,
+  Brain,
+  IndianRupee,
+  ChevronDown,
+} from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import NewsCard from "@/components/NewsCard";
 import PortfolioStock from "@/components/PortfolioStock";
 import SentimentIndicator from "@/components/SentimentIndicator";
-import { stockMap } from "@/lib/stockMap";
+import SentimentBreakdown from "@/components/SentimentBreakdown";
 
 interface NewsItem {
   id: string;
@@ -17,9 +29,18 @@ interface NewsItem {
   source: string;
   time: string;
   summary: string;
+  url?: string;
   stocks?: string[];
   sentiment?: "positive" | "negative" | "neutral";
   confidence?: number;
+}
+
+interface NewsPage {
+  items: NewsItem[];
+  page: number;
+  pageSize: number;
+  total: number;
+  hasMore: boolean;
 }
 
 interface Stock {
@@ -30,12 +51,12 @@ interface Stock {
   changePercent: number;
 }
 
-type SentimentSummaryItem = {
+interface SentimentSummaryItem {
   headline: string;
   sentiment: "positive" | "negative" | "neutral";
   confidence: number;
   reason: string;
-};
+}
 
 interface SentimentAnalysis {
   overall: "positive" | "negative" | "neutral";
@@ -43,440 +64,685 @@ interface SentimentAnalysis {
   summary: SentimentSummaryItem[];
 }
 
+const BASE_URL = import.meta.env.VITE_API_URL;
+
+const NewsSkeleton = () => (
+  <div className="bg-white rounded-xl border border-slate-200 border-l-4 border-l-slate-200 p-5 space-y-3">
+    <Skeleton className="h-4 w-full" />
+    <Skeleton className="h-4 w-4/5" />
+    <Skeleton className="h-3 w-2/3" />
+    <div className="flex justify-between">
+      <Skeleton className="h-3 w-24" />
+      <Skeleton className="h-5 w-16 rounded-full" />
+    </div>
+  </div>
+);
+
+const EmptyState = ({
+  icon: Icon,
+  title,
+  description,
+}: {
+  icon: React.ElementType;
+  title: string;
+  description: string;
+}) => (
+  <div className="col-span-full flex flex-col items-center justify-center py-16 text-center">
+    <div className="w-14 h-14 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
+      <Icon className="h-7 w-7 text-slate-400" />
+    </div>
+    <p className="font-semibold text-slate-700 mb-1">{title}</p>
+    <p className="text-sm text-slate-400 max-w-xs">{description}</p>
+  </div>
+);
+
 const Index = () => {
+  // --- news pagination state ---
   const [news, setNews] = useState<NewsItem[]>([]);
+  const [newsPage, setNewsPage] = useState(1);
+  const [newsTotal, setNewsTotal] = useState(0);
+  const [hasMoreNews, setHasMoreNews] = useState(false);
+  const [loadingNews, setLoadingNews] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
+
+  // --- portfolio state ---
   const [portfolio, setPortfolio] = useState<Stock[]>([]);
-  const [newStock, setNewStock] = useState("");
-  const [loading, setLoading] = useState(false);
-  // const [sentimentAnalysis, setSentimentAnalysis] = useState<any>(null);
-  const [sentimentAnalysis, setSentimentAnalysis] = useState<{
-    overall: "positive" | "neutral" | "negative";
-    confidence: number;
-    summary: SentimentSummaryItem[];
-  } | null>(null);
-
   const [portfolioNews, setPortfolioNews] = useState<NewsItem[]>([]);
+  const [loadingPortfolioNews, setLoadingPortfolioNews] = useState(false);
+
+  // --- sentiment ---
+  const [sentiment, setSentiment] = useState<SentimentAnalysis | null>(null);
+
+  // --- misc ---
+  const [newStock, setNewStock] = useState("");
+  const [addingStock, setAddingStock] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [apiOnline, setApiOnline] = useState(true);
   const { toast } = useToast();
-  const baseUrl = import.meta.env.VITE_API_URL;
 
-  useEffect(() => {
-    const loadData = async () => {
-      setLoading(true);
+  // ── fetch a page of news ───────────────────────────────────────────────────
 
-      // const newsRes = await fetch("http://localhost:5000/api/news");
-      // const newsData = await newsRes.json();
-
-      // const portfolioRes = await fetch("http://localhost:5000/api/portfolio");
-      // const portfolioData = await portfolioRes.json();
-
-      const newsRes = await fetch(`${baseUrl}/api/news`);
-      const newsData = await newsRes.json();
-
-      const portfolioRes = await fetch(`${baseUrl}/api/portfolio`);
-      const portfolioData = await portfolioRes.json();
-
-      setNews(newsData);
-      setPortfolio(portfolioData);
-
-      await analyzeSentiment(newsData, portfolioData);
-
-      setLoading(false);
-    };
-
-    loadData();
+  const fetchNewsPage = useCallback(async (page: number, append = false) => {
+    try {
+      const res = await fetch(`${BASE_URL}/news?page=${page}`);
+      if (!res.ok) throw new Error("API error");
+      const data: NewsPage = await res.json();
+      setNews((prev) => append ? [...prev, ...data.items] : data.items);
+      setNewsPage(data.page);
+      setNewsTotal(data.total);
+      setHasMoreNews(data.hasMore);
+      setApiOnline(true);
+      return data;
+    } catch {
+      setApiOnline(false);
+      throw new Error("Failed to fetch news");
+    }
   }, []);
 
-  useEffect(() => {
-    if (portfolio.length > 0 || news.length > 0) {
-      analyzeSentiment(news, portfolio);
-    } else {
-      // Clear data if portfolio is empty
-      setSentimentAnalysis({
-        overall: "neutral",
-        confidence: 70,
-        summary: [],
-      });
+  // ── fetch portfolio news from the dedicated endpoint ───────────────────────
+  // This searches ALL cached news on the backend, not just what's on screen
+
+  const fetchPortfolioNews = useCallback(async (portfolioData: Stock[]) => {
+    if (portfolioData.length === 0) {
       setPortfolioNews([]);
-    }
-  }, [portfolio, news]);
-
-  const getRelevantNews = (
-    newsData: NewsItem[],
-    portfolioSymbols: string[]
-  ) => {
-    return newsData.filter((n) => {
-      const matchesStocks =
-        n.stocks?.some((stock) =>
-          portfolioSymbols.includes(stock.toUpperCase())
-        ) ?? false;
-
-      const matchesTitle = portfolioSymbols.some((symbol) =>
-        n.title.toLowerCase().includes(symbol.toLowerCase())
-      );
-
-      return matchesStocks || matchesTitle;
-    });
-  };
-
-  const getPortfolioNews = (portfolio: Stock[], allNews: NewsItem[]) => {
-    const aliases = portfolio.flatMap(
-      (stock) => stockMap[stock.symbol] || [stock.symbol]
-    );
-
-    return allNews.filter((article) =>
-      aliases.some((alias) =>
-        article.title.toLowerCase().includes(alias.toLowerCase())
-      )
-    );
-  };
-
-  const analyzeSentiment = async (
-    newsData = news,
-    portfolioData = portfolio
-  ) => {
-    const portfolioSymbols = portfolioData.map((s) => s.symbol.toUpperCase());
-    console.log("📦 Portfolio Symbols for sentiment:", portfolioSymbols);
-
-    const relevantNews = getRelevantNews(newsData, portfolioSymbols);
-    console.log("📰 Relevant news for sentiment:", relevantNews);
-
-    const headlines = relevantNews.map((n) => n.title);
-    console.log("🧠 Headlines to send for sentiment:", headlines);
-
-    if (headlines.length === 0) {
-      console.warn("⚠ No relevant headlines found for sentiment analysis.");
-      setSentimentAnalysis({
-        overall: "neutral",
-        confidence: 70,
-        summary: [],
-      });
-      setPortfolioNews(getPortfolioNews(portfolioData, newsData));
       return;
     }
-
+    setLoadingPortfolioNews(true);
     try {
-      // const response = await fetch("http://localhost:5000/api/sentiment", {
-      //   method: "POST",
-      //   headers: { "Content-Type": "application/json" },
-      //   body: JSON.stringify({ headlines }),
-      // });
-      const response = await fetch(`${baseUrl}/api/sentiment`, {
+      const results = await Promise.all(
+        portfolioData.map((s) =>
+          fetch(`${BASE_URL}/news/for-stock/${s.symbol}`)
+            .then((r) => (r.ok ? r.json() : []))
+            .catch(() => [] as NewsItem[])
+        )
+      );
+      // Merge and deduplicate by id
+      const merged = results.flat() as NewsItem[];
+      const seen = new Set<string>();
+      const deduped = merged.filter((n) => {
+        if (seen.has(n.id)) return false;
+        seen.add(n.id);
+        return true;
+      });
+      // Sort by most recent first (use id/title as stable sort if no date)
+      setPortfolioNews(deduped);
+    } catch {
+      setPortfolioNews([]);
+    } finally {
+      setLoadingPortfolioNews(false);
+    }
+  }, []);
+
+  // ── sentiment analysis ─────────────────────────────────────────────────────
+
+  const runSentimentAnalysis = useCallback(async (
+    portfolioNewsData: NewsItem[],
+    portfolioData: Stock[]
+  ) => {
+    if (portfolioData.length === 0 || portfolioNewsData.length === 0) {
+      setSentiment({ overall: "neutral", confidence: 70, summary: [] });
+      return;
+    }
+    // Cap at 10 headlines to keep latency reasonable
+    const headlines = portfolioNewsData.slice(0, 10).map((n) => n.title);
+    try {
+      const res = await fetch(`${BASE_URL}/sentiment`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ headlines }),
       });
-
-      const result = await response.json();
-      const relevantSummary = Array.isArray(result.sentiment)
-        ? result.sentiment
+      if (!res.ok) throw new Error("Sentiment API error");
+      const data = await res.json();
+      const items: SentimentSummaryItem[] = Array.isArray(data.sentiment)
+        ? data.sentiment.map((i: SentimentSummaryItem) => ({
+            ...i,
+            sentiment: (i.sentiment as string).toLowerCase() as
+              | "positive"
+              | "negative"
+              | "neutral",
+          }))
         : [];
-
-      const dominantSentiment = relevantSummary.reduce((acc, item) => {
-        const score =
-          item.sentiment === "positive"
-            ? 1
-            : item.sentiment === "negative"
-            ? -1
-            : 0;
-        return acc + score;
-      }, 0);
-
-      const overall =
-        dominantSentiment > 0
-          ? "positive"
-          : dominantSentiment < 0
-          ? "negative"
-          : "neutral";
-
-      const avgConfidence = relevantSummary.length
-        ? Math.round(
-            relevantSummary.reduce(
-              (sum, item) => sum + (item.confidence || 70),
-              0
-            ) / relevantSummary.length
-          )
+      const score = items.reduce(
+        (acc, i) =>
+          acc + (i.sentiment === "positive" ? 1 : i.sentiment === "negative" ? -1 : 0),
+        0
+      );
+      const overall = score > 0 ? "positive" : score < 0 ? "negative" : "neutral";
+      const avgConf = items.length
+        ? Math.round(items.reduce((s, i) => s + (i.confidence || 70), 0) / items.length)
         : 70;
-
-      setSentimentAnalysis({
-        overall,
-        confidence: avgConfidence,
-        summary: relevantSummary,
-      });
-    } catch (error) {
-      console.error("❌ Sentiment analysis failed:", error);
-      setSentimentAnalysis(null);
+      setSentiment({ overall, confidence: avgConf, summary: items });
+    } catch {
+      setSentiment({ overall: "neutral", confidence: 70, summary: [] });
     }
+  }, []);
 
-    setPortfolioNews(getPortfolioNews(portfolioData, newsData));
-  };
+  // ── initial load ───────────────────────────────────────────────────────────
 
-  const addStock = async () => {
-    if (newStock.trim()) {
+  const loadInitialData = useCallback(
+    async (showToast = false) => {
+      setLoadingNews(true);
       try {
-        // const response = await fetch("http://localhost:5000/api/stock", {
-        //   method: "POST",
-        //   headers: { "Content-Type": "application/json" },
-        //   body: JSON.stringify({ symbol: newStock.trim().toUpperCase() }),
-        // });
-        const response = await fetch(`${baseUrl}/api/stock`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ symbol: newStock.trim().toUpperCase() }),
-        });
+        const [, portfolioRes] = await Promise.all([
+          fetchNewsPage(1, false),
+          fetch(`${BASE_URL}/portfolio`),
+        ]);
+        if (!portfolioRes.ok) throw new Error("Portfolio API error");
+        const portfolioData: Stock[] = await portfolioRes.json();
+        setPortfolio(portfolioData);
 
-        if (!response.ok) throw new Error("Failed to fetch stock data");
+        // Fetch portfolio news independently from full corpus
+        const pNews = await (async () => {
+          if (portfolioData.length === 0) return [];
+          setLoadingPortfolioNews(true);
+          try {
+            const results = await Promise.all(
+              portfolioData.map((s) =>
+                fetch(`${BASE_URL}/news/for-stock/${s.symbol}`)
+                  .then((r) => (r.ok ? r.json() : []))
+                  .catch(() => [] as NewsItem[])
+              )
+            );
+            const merged = (results.flat() as NewsItem[]);
+            const seen = new Set<string>();
+            return merged.filter((n) => {
+              if (seen.has(n.id)) return false;
+              seen.add(n.id);
+              return true;
+            });
+          } finally {
+            setLoadingPortfolioNews(false);
+          }
+        })();
 
-        const stockData: Stock = await response.json();
+        setPortfolioNews(pNews);
+        await runSentimentAnalysis(pNews, portfolioData);
 
-        const updatedPortfolio = [...portfolio, stockData];
-        setPortfolio(updatedPortfolio);
-        setNewStock("");
-
+        if (showToast) toast({ title: "Refreshed", description: "Latest data loaded." });
+      } catch {
+        setApiOnline(false);
         toast({
-          title: "Stock Added",
-          description: `${stockData.symbol} has been added to your portfolio`,
-        });
-
-        // await fetch("http://localhost:5000/api/portfolio", {
-        //   method: "POST",
-        //   headers: { "Content-Type": "application/json" },
-        //   body: JSON.stringify(stockData),
-        // });
-        await fetch(`${baseUrl}/api/portfolio`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(stockData),
-        });
-
-        // await analyzeSentiment(news, updatedPortfolio);
-      } catch (error) {
-        toast({
-          title: "Error",
-          description: "Could not fetch stock data. Please try again.",
+          title: "Connection Error",
+          description: "Could not reach the API. Is the backend running?",
           variant: "destructive",
         });
+      } finally {
+        setLoadingNews(false);
+        setRefreshing(false);
       }
+    },
+    [fetchNewsPage, runSentimentAnalysis, toast]
+  );
+
+  useEffect(() => {
+    loadInitialData();
+  }, [loadInitialData]);
+
+  // ── infinite scroll via IntersectionObserver ───────────────────────────────
+
+  useEffect(() => {
+    if (!hasMoreNews) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && !loadingMore && !loadingNews) {
+          handleLoadMore();
+        }
+      },
+      { threshold: 0.1 }
+    );
+    if (loadMoreRef.current) observer.observe(loadMoreRef.current);
+    return () => observer.disconnect();
+  }, [hasMoreNews, loadingMore, loadingNews, newsPage]); // eslint-disable-line
+
+  const handleLoadMore = async () => {
+    if (loadingMore || !hasMoreNews) return;
+    setLoadingMore(true);
+    try {
+      await fetchNewsPage(newsPage + 1, true);
+    } finally {
+      setLoadingMore(false);
     }
   };
 
-  const removeStock = async (symbol: string) => {
-    const updatedPortfolio = portfolio.filter(
-      (stock) => stock.symbol !== symbol
-    );
-    setPortfolio(updatedPortfolio);
+  // ── add stock ──────────────────────────────────────────────────────────────
 
-    // await fetch(`http://localhost:5000/api/portfolio/${symbol}`, {
-    //   method: "DELETE",
-    // });
-    await fetch(`${baseUrl}/api/portfolio/${symbol}`, {
-      method: "DELETE",
-    });
+  const addStock = async () => {
+    const symbol = newStock.trim().toUpperCase();
+    if (!symbol) return;
+    if (portfolio.find((s) => s.symbol === symbol)) {
+      toast({ title: "Already in portfolio", description: `${symbol} is already added.`, variant: "destructive" });
+      return;
+    }
+    setAddingStock(true);
+    try {
+      const res = await fetch(`${BASE_URL}/stock`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symbol }),
+      });
+      if (!res.ok) throw new Error("Failed to fetch stock");
+      const stockData: Stock = await res.json();
+      await fetch(`${BASE_URL}/portfolio`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(stockData),
+      });
+      const updated = [...portfolio, stockData];
+      setPortfolio(updated);
+      setNewStock("");
 
-    toast({
-      title: "Stock Removed",
-      description: `${symbol} has been removed from your portfolio`,
-    });
-
-    // await analyzeSentiment(news, updatedPortfolio);
+      // Fetch fresh portfolio news for the new stock too
+      await fetchPortfolioNews(updated);
+      toast({ title: "Stock Added", description: `${stockData.symbol} added to your portfolio.` });
+    } catch {
+      toast({ title: "Error", description: "Could not fetch stock data.", variant: "destructive" });
+    } finally {
+      setAddingStock(false);
+    }
   };
 
+  // ── remove stock ───────────────────────────────────────────────────────────
+
+  const removeStock = async (symbol: string) => {
+    const updated = portfolio.filter((s) => s.symbol !== symbol);
+    setPortfolio(updated);
+    try {
+      await fetch(`${BASE_URL}/portfolio/${symbol}`, { method: "DELETE" });
+    } catch { /* ignore */ }
+    if (updated.length === 0) {
+      setPortfolioNews([]);
+      setSentiment({ overall: "neutral", confidence: 70, summary: [] });
+    } else {
+      await fetchPortfolioNews(updated);
+    }
+    toast({ title: "Removed", description: `${symbol} removed from portfolio.` });
+  };
+
+  // ── effect: re-run sentiment when portfolioNews changes ───────────────────
+
+  useEffect(() => {
+    if (portfolio.length > 0) {
+      runSentimentAnalysis(portfolioNews, portfolio);
+    }
+  }, [portfolioNews]); // eslint-disable-line
+
+  const totalValue = portfolio.reduce((sum, s) => sum + s.price, 0);
+  const gainers = portfolio.filter((s) => s.change >= 0).length;
+  const losers = portfolio.filter((s) => s.change < 0).length;
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-100 to-blue-100">
-      <div className="container mx-auto px-4 py-10 space-y-12">
-        {/* Heading */}
-        <div className="text-center space-y-3">
-          <h1 className="text-5xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-blue-700 to-cyan-500">
-            Smart Portfolio Insights
-          </h1>
-          <p className="text-gray-600 text-lg">
-            AI-powered stock market news analysis for your portfolio
-          </p>
+    <div className="min-h-screen bg-slate-50">
+      {/* Navbar */}
+      <nav className="sticky top-0 z-30 bg-white border-b border-slate-200 shadow-sm">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-14">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center">
+                <BarChart3 className="h-4 w-4 text-white" />
+              </div>
+              <span className="font-bold text-slate-900 text-base tracking-tight">StockPulse</span>
+              <Badge variant="outline" className="text-xs border-blue-200 text-blue-600 bg-blue-50 font-medium">
+                India
+              </Badge>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1.5 text-xs">
+                {apiOnline ? (
+                  <>
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    <span className="text-slate-500 hidden sm:inline">Live</span>
+                  </>
+                ) : (
+                  <>
+                    <WifiOff className="h-3.5 w-3.5 text-red-500" />
+                    <span className="text-red-500 text-xs hidden sm:inline">Offline</span>
+                  </>
+                )}
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => { setRefreshing(true); loadInitialData(true); }}
+                disabled={refreshing || loadingNews}
+                className="h-8 w-8 p-0 text-slate-500 hover:text-blue-600"
+                aria-label="Refresh"
+              >
+                <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+              </Button>
+            </div>
+          </div>
         </div>
+      </nav>
 
-        {/* Summary and Add Stock */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+        {/* Top row */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           {/* Portfolio Summary */}
-          <Card className="lg:col-span-2 border border-gray-200 bg-white/70 backdrop-blur-md shadow-2xl rounded-3xl transition-transform hover:-translate-y-1">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-xl font-semibold text-gray-800">
-                <Star className="h-5 w-5 text-yellow-500" />
-                Portfolio Summary
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4 text-gray-700">
-              <div className="flex justify-between text-base font-medium">
-                <span>Total Stocks</span>
-                <span>{portfolio.length}</span>
+          <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-200 p-5">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <BriefcaseBusiness className="h-4 w-4 text-slate-500" />
+                <span className="font-semibold text-slate-800 text-sm">Portfolio Overview</span>
               </div>
-              <div className="flex justify-between text-base font-semibold text-green-600">
-                <span>Portfolio Value</span>
-                <span>
-                  ₹
-                  {portfolio
-                    .reduce((sum, stock) => sum + stock.price, 0)
-                    .toLocaleString()}
-                </span>
+              {portfolio.length > 0 && (
+                <Badge variant="outline" className="text-xs text-slate-500">
+                  {portfolio.length} {portfolio.length === 1 ? "stock" : "stocks"}
+                </Badge>
+              )}
+            </div>
+            {portfolio.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-8 text-center">
+                <div className="w-12 h-12 rounded-xl bg-slate-100 flex items-center justify-center mb-3">
+                  <BriefcaseBusiness className="h-6 w-6 text-slate-300" />
+                </div>
+                <p className="text-sm font-medium text-slate-500">No stocks yet</p>
+                <p className="text-xs text-slate-400 mt-1">Add stocks to see your portfolio overview</p>
               </div>
-
-              {sentimentAnalysis && (
-                <div className="space-y-3 mt-4">
-                  <SentimentIndicator
-                    sentiment={sentimentAnalysis.overall}
-                    confidence={sentimentAnalysis.confidence}
-                  />
-                  <div className="max-h-48 overflow-y-auto pr-2 custom-scrollbar">
-                    {sentimentAnalysis.summary.map((item, idx) => (
-                      <div
-                        key={idx}
-                        className="border-b border-gray-200 pb-2 mb-2 last:mb-0"
-                      >
-                        <strong className="block text-sm text-gray-800">
-                          {item.headline}
-                        </strong>
-                        <div className="text-xs text-gray-600">
-                          Sentiment:{" "}
-                          <span className="capitalize">{item.sentiment}</span>,
-                          Confidence: {item.confidence}% <br />
-                          <span className="text-gray-500">
-                            Reason: {item.reason}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
+            ) : (
+              <div className="space-y-4">
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="bg-slate-50 rounded-xl p-3">
+                    <p className="text-xs text-slate-400 mb-1">Portfolio Value</p>
+                    <div className="flex items-center gap-1">
+                      <IndianRupee className="h-3.5 w-3.5 text-slate-700" />
+                      <span className="font-bold text-slate-900 text-base">
+                        {totalValue.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="bg-emerald-50 rounded-xl p-3">
+                    <p className="text-xs text-slate-400 mb-1">Gainers</p>
+                    <span className="font-bold text-emerald-700 text-base">{gainers}</span>
+                  </div>
+                  <div className="bg-red-50 rounded-xl p-3">
+                    <p className="text-xs text-slate-400 mb-1">Losers</p>
+                    <span className="font-bold text-red-600 text-base">{losers}</span>
                   </div>
                 </div>
-              )}
-            </CardContent>
-          </Card>
+                {sentiment && (
+                  <SentimentIndicator
+                    sentiment={sentiment.overall}
+                    confidence={sentiment.confidence}
+                  />
+                )}
+              </div>
+            )}
+          </div>
 
           {/* Add Stock */}
-          <Card className="border border-gray-200 bg-white/80 backdrop-blur-md shadow-2xl rounded-3xl transition-transform hover:-translate-y-1">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-xl font-semibold text-gray-800">
-                <Plus className="h-5 w-5 text-green-500" />
-                Add Stock to Portfolio
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="flex flex-col sm:flex-row gap-4">
-                <Input
-                  placeholder="Enter stock symbol (e.g., HDFCBANK)"
-                  value={newStock}
-                  onChange={(e) => setNewStock(e.target.value)}
-                  onKeyPress={(e) => e.key === "Enter" && addStock()}
-                  className="flex-1 border-gray-300 focus:ring-blue-500"
-                />
-                <Button
-                  onClick={addStock}
-                  className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 transition"
-                >
-                  <Plus className="h-4 w-4 mr-1" />
-                  Add Stock
-                </Button>
+          <div className="bg-white rounded-2xl border border-slate-200 p-5">
+            <div className="flex items-center gap-2 mb-4">
+              <Plus className="h-4 w-4 text-slate-500" />
+              <span className="font-semibold text-slate-800 text-sm">Add to Portfolio</span>
+            </div>
+            <div className="space-y-3">
+              <Input
+                placeholder="RELIANCE, TCS, INFY…"
+                value={newStock}
+                onChange={(e) => setNewStock(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && !addingStock && addStock()}
+                className="uppercase placeholder:normal-case font-mono tracking-wide border-slate-300 focus:border-blue-500"
+                disabled={addingStock}
+              />
+              <Button
+                onClick={addStock}
+                disabled={addingStock || !newStock.trim()}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium"
+              >
+                {addingStock ? (
+                  <RefreshCw className="h-4 w-4 animate-spin mr-2" />
+                ) : (
+                  <Plus className="h-4 w-4 mr-2" />
+                )}
+                {addingStock ? "Fetching…" : "Add Stock"}
+              </Button>
+            </div>
+            <div className="mt-4">
+              <p className="text-xs text-slate-400 mb-2">Quick add</p>
+              <div className="flex flex-wrap gap-1.5">
+                {["RELIANCE", "TCS", "INFY", "HDFCBANK", "SBIN"].map((sym) => (
+                  <button
+                    key={sym}
+                    onClick={() => setNewStock(sym)}
+                    className="text-xs px-2 py-1 rounded-md bg-slate-100 hover:bg-blue-100 hover:text-blue-700 text-slate-600 font-mono transition-colors"
+                  >
+                    {sym}
+                  </button>
+                ))}
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         </div>
 
-        {/* Tabs Section */}
-        <Tabs defaultValue="all-news" className="space-y-6">
-          <TabsList className="grid grid-cols-3 gap-2 bg-white border border-gray-200 rounded-lg p-1">
+        {/* Tabs */}
+        <Tabs defaultValue="all-news">
+          <TabsList className="bg-white border border-slate-200 rounded-xl p-1 h-auto gap-1 flex-wrap">
             <TabsTrigger
               value="all-news"
-              className="data-[state=active]:bg-blue-600 data-[state=active]:text-white"
+              className="rounded-lg text-sm data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-sm"
             >
-              All Market News
+              <Newspaper className="h-3.5 w-3.5 mr-1.5" />
+              Market News
+              {!loadingNews && newsTotal > 0 && (
+                <span className="ml-1.5 text-xs opacity-80">({news.length}/{newsTotal})</span>
+              )}
             </TabsTrigger>
             <TabsTrigger
               value="portfolio-news"
-              className="data-[state=active]:bg-blue-600 data-[state=active]:text-white"
+              className="rounded-lg text-sm data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-sm"
             >
+              <Newspaper className="h-3.5 w-3.5 mr-1.5" />
               Portfolio News
+              {portfolioNews.length > 0 && (
+                <span className="ml-1.5 text-xs opacity-80">({portfolioNews.length})</span>
+              )}
             </TabsTrigger>
             <TabsTrigger
               value="portfolio"
-              className="data-[state=active]:bg-blue-600 data-[state=active]:text-white"
+              className="rounded-lg text-sm data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-sm"
             >
+              <BriefcaseBusiness className="h-3.5 w-3.5 mr-1.5" />
               My Portfolio
+              {portfolio.length > 0 && (
+                <span className="ml-1.5 text-xs opacity-80">({portfolio.length})</span>
+              )}
+            </TabsTrigger>
+            <TabsTrigger
+              value="ai-sentiment"
+              className="rounded-lg text-sm data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-sm"
+            >
+              <Brain className="h-3.5 w-3.5 mr-1.5" />
+              AI Sentiment
+              {sentiment && sentiment.summary.length > 0 && (
+                <span className="ml-1.5 text-xs opacity-80">({sentiment.summary.length})</span>
+              )}
             </TabsTrigger>
           </TabsList>
 
-          {/* All News */}
-          <TabsContent value="all-news" className="space-y-4 pb-8">
-            <div className="flex justify-between items-center">
-              <h2 className="text-xl font-semibold text-gray-800">
-                Latest Market News
-              </h2>
-              <Badge variant="outline">{news.length} articles</Badge>
+          {/* All Market News */}
+          <TabsContent value="all-news" className="mt-4">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="font-bold text-slate-900">Latest Market News</h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {loadingNews ? "Loading…" : `${news.length} of ${newsTotal} articles · Multiple sources`}
+                </p>
+              </div>
+              {!loadingNews && newsTotal > 0 && (
+                <Badge variant="outline" className="text-xs text-slate-500">
+                  {newsTotal} total
+                </Badge>
+              )}
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {loading
-                ? Array.from({ length: 4 }).map((_, i) => (
-                    <Card
-                      key={i}
-                      className="animate-pulse border border-gray-200 p-4 rounded-xl"
-                    >
-                      <CardContent>
-                        <div className="h-4 bg-gray-200 rounded w-3/4 mb-2" />
-                        <div className="h-3 bg-gray-200 rounded w-1/2" />
-                      </CardContent>
-                    </Card>
-                  ))
-                : news.map((item) => <NewsCard key={item.id} news={item} />)}
-            </div>
-          </TabsContent>
 
-          {/* Portfolio News */}
-          <TabsContent value="portfolio-news" className="space-y-4 pb-8">
-            <div className="flex justify-between items-center">
-              <h2 className="text-xl font-semibold text-gray-800">
-                Portfolio-Relevant News
-              </h2>
-              <Badge variant="outline">
-                {portfolioNews.length} relevant articles
-              </Badge>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {loadingNews
+                ? Array.from({ length: 6 }).map((_, i) => <NewsSkeleton key={i} />)
+                : news.length === 0
+                ? (
+                  <EmptyState
+                    icon={AlertCircle}
+                    title="No news available"
+                    description="Could not load market news. Check your connection or try refreshing."
+                  />
+                )
+                : news.map((item) => <NewsCard key={item.id} news={item} showStocks />)
+              }
             </div>
-            {portfolioNews.length === 0 ? (
-              <Card className="text-center p-10">
-                <CardContent>
-                  <AlertCircle className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                  <p className="text-gray-600">
-                    No portfolio-specific news found
-                  </p>
-                  <p className="text-sm text-gray-500 mt-2">
-                    Add stocks to your portfolio to see relevant news
-                  </p>
-                </CardContent>
-              </Card>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {portfolioNews.map((item) => (
-                  <NewsCard key={item.id} news={item} showStocks />
-                ))}
+
+            {/* Load more trigger (auto via IntersectionObserver + manual fallback button) */}
+            {!loadingNews && (
+              <div ref={loadMoreRef} className="mt-6 flex flex-col items-center gap-3">
+                {loadingMore && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
+                    {Array.from({ length: 4 }).map((_, i) => <NewsSkeleton key={`more-${i}`} />)}
+                  </div>
+                )}
+                {hasMoreNews && !loadingMore && (
+                  <Button
+                    variant="outline"
+                    onClick={handleLoadMore}
+                    className="border-slate-300 text-slate-600 hover:border-blue-400 hover:text-blue-600"
+                  >
+                    <ChevronDown className="h-4 w-4 mr-1.5" />
+                    Load more ({newsTotal - news.length} remaining)
+                  </Button>
+                )}
+                {!hasMoreNews && news.length > 0 && (
+                  <p className="text-xs text-slate-400">All {newsTotal} articles loaded</p>
+                )}
               </div>
             )}
           </TabsContent>
 
-          {/* Portfolio Tab */}
-          <TabsContent value="portfolio" className="space-y-4 pb-8">
-            <div className="flex justify-between items-center">
-              <h2 className="text-xl font-semibold text-gray-800">
-                My Portfolio
-              </h2>
-              <Badge variant="outline">{portfolio.length} stocks</Badge>
+          {/* Portfolio News */}
+          <TabsContent value="portfolio-news" className="mt-4">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="font-bold text-slate-900">Portfolio News</h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {loadingPortfolioNews
+                    ? "Searching all sources…"
+                    : portfolioNews.length > 0
+                    ? `${portfolioNews.length} articles across all feeds`
+                    : "Articles related to your holdings"}
+                </p>
+              </div>
+              {portfolioNews.length > 0 && !loadingPortfolioNews && (
+                <Badge variant="outline" className="text-xs text-slate-500">
+                  {portfolioNews.length} found
+                </Badge>
+              )}
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-              {portfolio.map((stock) => (
-                <PortfolioStock
-                  key={stock.symbol}
-                  stock={stock}
-                  onRemove={() => removeStock(stock.symbol)}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {loadingPortfolioNews ? (
+                Array.from({ length: 4 }).map((_, i) => <NewsSkeleton key={i} />)
+              ) : portfolio.length === 0 ? (
+                <EmptyState
+                  icon={BriefcaseBusiness}
+                  title="No portfolio stocks"
+                  description="Add stocks to your portfolio to see relevant news here."
                 />
-              ))}
+              ) : portfolioNews.length === 0 ? (
+                <EmptyState
+                  icon={Newspaper}
+                  title="No relevant articles"
+                  description="No recent news across any feed matched your portfolio holdings."
+                />
+              ) : (
+                portfolioNews.map((item) => (
+                  <NewsCard key={item.id} news={item} showStocks />
+                ))
+              )}
             </div>
+          </TabsContent>
+
+          {/* My Portfolio */}
+          <TabsContent value="portfolio" className="mt-4">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="font-bold text-slate-900">My Portfolio</h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {portfolio.length > 0
+                    ? `${portfolio.length} stock${portfolio.length > 1 ? "s" : ""} tracked`
+                    : "No stocks added yet"}
+                </p>
+              </div>
+              {portfolio.length > 0 && (
+                <div className="flex items-center gap-1 text-sm font-semibold text-slate-700">
+                  <IndianRupee className="h-3.5 w-3.5" />
+                  {totalValue.toLocaleString("en-IN", { maximumFractionDigits: 0 })}
+                </div>
+              )}
+            </div>
+            {portfolio.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-20 text-center">
+                <div className="w-16 h-16 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
+                  <TrendingUp className="h-8 w-8 text-slate-300" />
+                </div>
+                <p className="font-semibold text-slate-600 mb-1">Your portfolio is empty</p>
+                <p className="text-sm text-slate-400 max-w-xs">
+                  Use the panel above to start tracking NSE stocks.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                {portfolio.map((stock) => (
+                  <PortfolioStock
+                    key={stock.symbol}
+                    stock={stock}
+                    onRemove={() => removeStock(stock.symbol)}
+                  />
+                ))}
+              </div>
+            )}
+          </TabsContent>
+          {/* AI Sentiment */}
+          <TabsContent value="ai-sentiment" className="mt-4">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="font-bold text-slate-900">AI Sentiment Analysis</h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {loadingPortfolioNews
+                    ? "Analyzing headlines…"
+                    : sentiment && sentiment.summary.length > 0
+                    ? `${sentiment.summary.length} headlines analyzed · powered by Groq LLaMA 3`
+                    : "Add portfolio stocks to get AI sentiment on related news"}
+                </p>
+              </div>
+              {sentiment && sentiment.summary.length > 0 && (
+                <SentimentIndicator
+                  sentiment={sentiment.overall}
+                  confidence={sentiment.confidence}
+                />
+              )}
+            </div>
+
+            <SentimentBreakdown
+              items={sentiment?.summary ?? []}
+              loading={loadingPortfolioNews}
+            />
+
+            {!loadingPortfolioNews && (!sentiment || sentiment.summary.length === 0) && (
+              <EmptyState
+                icon={Brain}
+                title="No sentiment data yet"
+                description="Add stocks to your portfolio — AI will analyze relevant news headlines and show sentiment here."
+              />
+            )}
           </TabsContent>
         </Tabs>
       </div>
+
+      {/* Footer */}
+      <footer className="mt-10 border-t border-slate-200 bg-white py-4">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-400">
+          <span>© 2024 StockPulse · AI-powered portfolio insights for Indian markets</span>
+          <span>News: ET Markets, Moneycontrol, NDTV Profit · AI: Groq LLaMA 3</span>
+        </div>
+      </footer>
     </div>
   );
 };

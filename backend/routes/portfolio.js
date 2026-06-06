@@ -7,21 +7,25 @@ router.get("/", (req, res) => {
   res.json(portfolio);
 });
 
+// Accept a full stock object (symbol, name, price, change, changePercent)
 router.post("/", (req, res) => {
-  const { symbol } = req.body;
-  if (!symbol) return res.status(400).json({ error: "Symbol is required" });
+  const stock = req.body;
+  if (!stock || !stock.symbol) return res.status(400).json({ error: "Stock data is required" });
 
-  // Mock stock info (simulate fetch from API)
-  const stock = {
-    symbol: symbol.toUpperCase(),
-    name: `${symbol.toUpperCase()} Company`,
-    price: Math.random() * 1000 + 500,
-    change: (Math.random() - 0.5) * 50,
-    changePercent: (Math.random() - 0.5) * 5,
+  // Prevent duplicates
+  const exists = portfolio.find(s => s.symbol === stock.symbol.toUpperCase());
+  if (exists) return res.status(409).json({ error: "Stock already in portfolio" });
+
+  const entry = {
+    symbol: stock.symbol.toUpperCase(),
+    name: stock.name || `${stock.symbol.toUpperCase()} Company`,
+    price: stock.price || 0,
+    change: stock.change || 0,
+    changePercent: stock.changePercent || 0,
   };
 
-  portfolio.push(stock);
-  res.json(stock);
+  portfolio.push(entry);
+  res.json(entry);
 });
 
 router.delete("/:symbol", (req, res) => {

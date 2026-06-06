@@ -1,65 +1,83 @@
-import { Badge } from "@/components/ui/badge";
-import { TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus, Brain } from "lucide-react";
+
+export interface SentimentSummaryItem {
+  headline: string;
+  sentiment: "positive" | "negative" | "neutral";
+  confidence: number;
+  reason: string;
+}
 
 interface SentimentIndicatorProps {
   sentiment: "positive" | "negative" | "neutral";
   confidence?: number;
-  summary?: string; // make it optional
 }
 
+export const sentimentConfig = {
+  positive: {
+    icon: <TrendingUp className="h-4 w-4" />,
+    iconSm: <TrendingUp className="h-3 w-3" />,
+    bg: "bg-emerald-50",
+    border: "border-emerald-200",
+    text: "text-emerald-700",
+    bar: "bg-emerald-400",
+    dot: "bg-emerald-500",
+    label: "Bullish",
+  },
+  negative: {
+    icon: <TrendingDown className="h-4 w-4" />,
+    iconSm: <TrendingDown className="h-3 w-3" />,
+    bg: "bg-red-50",
+    border: "border-red-200",
+    text: "text-red-700",
+    bar: "bg-red-400",
+    dot: "bg-red-500",
+    label: "Bearish",
+  },
+  neutral: {
+    icon: <Minus className="h-4 w-4" />,
+    iconSm: <Minus className="h-3 w-3" />,
+    bg: "bg-slate-50",
+    border: "border-slate-200",
+    text: "text-slate-600",
+    bar: "bg-slate-300",
+    dot: "bg-slate-400",
+    label: "Neutral",
+  },
+};
+
+/** Compact pill + confidence bar — lives inside the portfolio summary card */
 const SentimentIndicator = ({
   sentiment,
-  confidence,
-  summary,
+  confidence = 70,
 }: SentimentIndicatorProps) => {
-  const getSentimentConfig = () => {
-    switch (sentiment) {
-      case "positive":
-        return {
-          icon: <TrendingUp className="h-4 w-4" />,
-          color: "bg-green-100 text-green-800 border-green-200",
-          label: "Positive",
-        };
-      case "negative":
-        return {
-          icon: <TrendingDown className="h-4 w-4" />,
-          color: "bg-red-100 text-red-800 border-red-200",
-          label: "Negative",
-        };
-      default:
-        return {
-          icon: <Minus className="h-4 w-4" />,
-          color: "bg-gray-100 text-gray-800 border-gray-200",
-          label: "Neutral",
-        };
-    }
-  };
-
-  const config = getSentimentConfig();
+  const c = sentimentConfig[sentiment] ?? sentimentConfig.neutral;
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <span className="text-sm text-gray-600">Market Sentiment</span>
+    <div className="space-y-2.5">
+      <div className={`flex items-center justify-between rounded-lg border px-3 py-2.5 ${c.bg} ${c.border}`}>
         <div className="flex items-center gap-2">
-          <Badge className={`${config.color} flex items-center gap-1`}>
-            {config.icon}
-            {config.label}
-          </Badge>
-          {confidence !== undefined && confidence !== 70 && (
-            <span className="text-xs text-gray-500">{confidence}%</span>
-          )}
+          <Brain className="h-4 w-4 text-slate-500" />
+          <span className="text-xs font-medium text-slate-500">AI Sentiment</span>
+        </div>
+        <div className={`flex items-center gap-1.5 font-semibold text-sm ${c.text}`}>
+          {c.icon}
+          <span>{c.label}</span>
+          <span className="text-xs font-normal opacity-70">· {confidence}%</span>
         </div>
       </div>
-      {Array.isArray(summary) ? (
-        <ul className="list-disc list-inside text-xs text-gray-600 space-y-1">
-          {summary.map((point: string, idx: number) => (
-            <li key={idx}>{point}</li>
-          ))}
-        </ul>
-      ) : (
-        <p className="text-xs text-gray-600 leading-relaxed">{summary}</p>
-      )}
+
+      <div className="space-y-1">
+        <div className="flex justify-between text-xs text-slate-400">
+          <span>Confidence</span>
+          <span>{confidence}%</span>
+        </div>
+        <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+          <div
+            className={`h-full rounded-full transition-all duration-700 ${c.bar}`}
+            style={{ width: `${confidence}%` }}
+          />
+        </div>
+      </div>
     </div>
   );
 };
